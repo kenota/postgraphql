@@ -25,16 +25,19 @@ export default function createCollectionQueryFieldEntries <TValue>(
   if (paginator) {
     // Creates the field entries for our paginator condition type.
     const gqlConditionFieldEntries =
-      Array.from(type.fields).map<[string, GraphQLInputFieldConfig<mixed> & { internalName: string }]>(([fieldName, field]) =>
-        [formatName.field(fieldName), {
-          description: `Checks for equality with the object’s \`${formatName.field(fieldName)}\` field.`,
-          // Get the type for this field, but always make sure that it is
-          // nullable. We don’t want to require conditions.
-          type: getGqlType(buildToken, new NullableType(field.type), true),
-          // We include this internal name so that we can resolve the arguments
-          // back into actual values.
-          internalName: fieldName,
-        }],
+      Array.from(type.fields).map(
+        <TFieldValue>([fieldName, field]: [string, ObjectType.Field<TValue, TFieldValue>]) => ({
+          key: formatName.field(fieldName),
+          value: {
+            description: `Checks for equality with the object’s \`${formatName.field(fieldName)}\` field.`,
+            // Get the type for this field, but always make sure that it is
+            // nullable. We don’t want to require conditions.
+            type: getGqlType(buildToken, new NullableType(field.type), true),
+            // We include this internal name so that we can resolve the arguments
+            // back into actual values.
+            internalName: fieldName,
+          },
+        })
       )
 
     // Creates our GraphQL condition type.
@@ -133,18 +136,10 @@ function createCollectionPrimaryKeyField <TValue, TKey>(
 
     async resolve (source, args, context): Promise<mixed> {
       const result = idSerde.deserialize(inventory, args[options.nodeIdFieldName] as string)
-
-      if (result.collection !== collection)
-        throw new Error(`The provided id is for collection '${result.collection.name}', not the expected collection '${collection.name}'.`)
-
-      if (!keyType.isTypeOf(result.keyValue))
-        throw new Error(`The provided id is not of the correct type.`)
-
+      if (result.collection !== collection) throw new Error(`The provided id is for collection '${result.collection.name}', not the expected collection '${collection.name}'.`)
+      if (!keyType.isTypeOf(result.keyValue)) throw new Error(`The provided id is not of the correct type.`)
       const value = await collectionKey.read!(context, result.keyValue)
-
-      if (value == null)
-        return
-
+      if (value == null) return
       return intoGqlOutput(value)
     },
   }
@@ -154,24 +149,26 @@ function createCollectionPrimaryKeyField <TValue, TKey>(
  * Creates a field using the value from any collection key.
  */
 // TODO: test
-function createCollectionKeyField <TKey>(
+function createCollectionKeyField <TValue, TKey>(
   buildToken: BuildToken,
-  collectionKey: CollectionKey<TKey>,
-): GraphQLFieldConfig<mixed, mixed> | undefined {
+  collectionKey: CollectionKey<TValue, TKey>,
+): GraphQLFieldConfig<mixed> | undefined {
   // If we can’t read from this collection key, stop.
   if (collectionKey.read == null)
     return
 
   const { collection } = collectionKey
-  const collectionType = getCollectionGqlType(buildToken, collection)
+  const { gqlType: collectionGqlType, intoGqlOutput } = getGqlOutputType(buildToken, collection.type)
   const inputHelpers = createCollectionKeyInputHelpers<TKey>(buildToken, collectionKey)
 
   return {
-    type: collectionType,
+    type: collectionGqlType,
     args: buildObject(inputHelpers.fieldEntries),
-    async resolve (source, args, context): Promise<ObjectType.Value | null> {
+    async resolve (source, args, context): Promise<mixed> {
       const key = inputHelpers.getKey(args)
-      return await collectionKey.read!(context, key)
+      const value = await collectionKey.read!(context, key)
+      if (value == null) return
+      return intoGqlOutput(value)
     },
   }
 }
