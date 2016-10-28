@@ -24,6 +24,7 @@ export default function createCollectionGqlType<TValue> (
     name: collectionTypeName,
     description: collection.description,
 
+    // TODO: Collection values should include the type in their value #189.
     isTypeOf: value => type.isTypeOf(value),
 
     // If there is a primary key, this is a node.
